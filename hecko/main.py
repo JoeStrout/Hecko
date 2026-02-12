@@ -13,7 +13,7 @@ from hecko.vad.silero import load_vad_model, SpeechRecorder
 from hecko.stt.whisper import load_model as load_whisper, transcribe
 from hecko.tts.piper import speak, play_sound
 from hecko.commands import router
-from hecko.commands import greeting, quit_demo, timer, weather, time_cmd, reminder, grocery, music, math_cmd
+from hecko.commands import greeting, quit_demo, timer, weather, time_cmd, reminder, grocery, music, math_cmd, sports, repeat
 
 # How long to wait for speech after wake word before playing the prompt
 _PRE_SPEECH_TIMEOUT = 0.5  # seconds
@@ -57,6 +57,8 @@ def main():
     router.register(grocery)
     router.register(music)
     router.register(math_cmd)
+    router.register(sports)
+    router.register(repeat)
 
     # Wire up timer/reminder announcements to TTS
     def announce(text):

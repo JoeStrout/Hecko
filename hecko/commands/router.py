@@ -6,6 +6,7 @@ Each command module must provide:
 """
 
 _commands = []
+last_response = None  # most recent command response, for "say that again"
 
 
 def register(command_module):
@@ -39,6 +40,11 @@ def dispatch(text):
             if cmd.__name__.split(".")[-1] == best_name:
                 best_cmd = cmd
                 break
-        return best_cmd.handle(text), scores
+        response = best_cmd.handle(text)
+        # Don't overwrite last_response if this was a repeat command
+        if best_name != "repeat":
+            global last_response
+            last_response = response
+        return response, scores
 
     return f"I heard you say: {text}", []
