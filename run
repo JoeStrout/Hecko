@@ -1,0 +1,2 @@
+#!/bin/bash
+exec /Users/jstrout/.local/bin/micromamba run -n hecko python -m hecko

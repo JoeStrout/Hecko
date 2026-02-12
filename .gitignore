@@ -1,0 +1,29 @@
+# Credentials (keep out of version control)
+hecko/og_credentials.py
+hecko/spotify_credentials.py
+
+# Auth token caches
+.spotipy_cache
+hecko/.spotipy_cache
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# Models (large binary files — download separately)
+models/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude Code
+.claude/
