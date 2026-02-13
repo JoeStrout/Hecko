@@ -24,6 +24,7 @@ from hecko.spotify_credentials import (
     SPOTIFY_CLIENT_SECRET,
     SPOTIFY_REDIRECT_URI,
 )
+from hecko.commands.parse import Parse
 
 # Spotify OAuth scopes we need
 _SCOPES = " ".join([
@@ -314,47 +315,49 @@ def _classify(text):
     return None
 
 
-def score(text):
+def parse(text):
     result = _classify(text)
     if result is not None:
-        return 0.9
+        action, detail = result
+        args = {}
+        if action == "play_playlist":
+            args["name"] = detail
+        elif action == "play_track":
+            args["title"] = detail[0]
+            args["artist"] = detail[1]
+        return Parse(command=action, score=0.9, args=args)
+
     # Weak: mentions music/spotify/song
     if re.search(r"\b(music|spotify|song|playlist)\b", text, re.I):
-        return 0.4
-    return 0.0
+        return Parse(command="play_music", score=0.4, args={})
+    return None
 
 
-def handle(text):
-    result = _classify(text)
-    if result is None:
-        return "Sorry, I didn't understand that music command."
-
-    action, detail = result
-
+def handle(p):
     try:
-        if action == "pause":
+        if p.command == "pause":
             sp = _get_sp()
             sp.pause_playback(device_id=_get_device_id())
             return "Music paused."
 
-        elif action == "resume":
+        elif p.command == "resume":
             sp = _get_sp()
             sp.start_playback(device_id=_get_device_id())
             return "Resuming music."
 
-        elif action == "stop":
+        elif p.command == "stop":
             sp = _get_sp()
             device_id = _get_device_id()
             sp.pause_playback(device_id=device_id)
             sp.seek_track(0, device_id=device_id)
             return "Music stopped."
 
-        elif action == "skip":
+        elif p.command == "skip":
             sp = _get_sp()
             sp.next_track(device_id=_get_device_id())
             return "Skipping to the next song."
 
-        elif action == "now_playing":
+        elif p.command == "now_playing":
             sp = _get_sp()
             pb = sp.current_playback()
             if not pb or not pb.get("item"):
@@ -365,12 +368,12 @@ def handle(text):
             state = "playing" if pb.get("is_playing") else "paused"
             return f"Currently {state}: {title} by {artists}."
 
-        elif action == "play_music":
+        elif p.command == "play_music":
             count = _play_liked_songs()
             return f"Playing your liked songs. {count} tracks shuffled."
 
-        elif action == "play_playlist":
-            playlist_name = detail
+        elif p.command == "play_playlist":
+            playlist_name = p.args["name"]
             # "liked songs" is special — not a real playlist
             if _normalize(playlist_name) in ("liked songs", "liked", "favorites",
                                               "my liked songs", "my favorites"):
@@ -386,8 +389,9 @@ def handle(text):
             sp.start_playback(device_id=device_id, context_uri=f"spotify:playlist:{pid}")
             return f"Playing your {matched_name} playlist."
 
-        elif action == "play_track":
-            title, artist = detail
+        elif p.command == "play_track":
+            title = p.args["title"]
+            artist = p.args.get("artist")
             sp = _get_sp()
             q = f'track:"{title}"'
             if artist:
@@ -416,23 +420,10 @@ if __name__ == "__main__":
         "Play some music.",
         "Play music.",
         "Let's have some music.",
-        "Let's hear some music.",
-        "How about some music.",
-        "Let's play some music.",
-        "Let's listen to some music.",
-        "Put on some music.",
-        "I want some music.",
-        "I'd like some music.",
-        "Turn on some music.",
-        "Music, please.",
-        "Throw on some music.",
-        "Let's get some music.",
         "Play my Birthday Favorites playlist.",
-        "Play the Birthday Favorites playlist.",
         "Play Pour Some Sugar on Me.",
         "Play Ordinary by Alex Warren.",
         "Pause music.",
-        "Pause the music.",
         "Resume music.",
         "Stop the music.",
         "Skip song.",
@@ -441,5 +432,8 @@ if __name__ == "__main__":
         "What song is this?",
     ]
     for t in tests:
-        result = _classify(t)
-        print(f"  {t!r:55s} => {result}")
+        result = parse(t)
+        if result:
+            print(f"  {t!r:55s} => {result.command} {result.args}")
+        else:
+            print(f"  {t!r:55s} => None")

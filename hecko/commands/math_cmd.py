@@ -15,6 +15,8 @@ import re
 
 import pint
 
+from hecko.commands.parse import Parse
+
 _ureg = pint.UnitRegistry()
 
 # --- Fractional word numbers ---
@@ -173,65 +175,7 @@ def _fmt_unit(unit, value):
     return name
 
 
-# --- Unit conversion ---
-
-def _try_unit_conversion(text):
-    """Try to parse a unit conversion query. Returns response string or None."""
-    t = text.lower().strip().rstrip("?.")
-
-    # Pattern: "how many X in (a/an/N) Y"
-    m = re.search(r"how\s+many\s+(\w[\w\s]*?)\s+(?:are\s+)?in\s+(.+)", t)
-    if m:
-        target_unit_raw = m.group(1).strip()
-        source_raw = m.group(2).strip()
-        return _do_conversion(source_raw, target_unit_raw)
-
-    # Pattern: "convert N X to Y"
-    m = re.search(r"convert\s+(.+?)\s+to\s+(\w[\w\s]*?)$", t)
-    if m:
-        source_raw = m.group(1).strip()
-        target_unit_raw = m.group(2).strip()
-        return _do_conversion(source_raw, target_unit_raw)
-
-    # Pattern: "what is N X in Y"
-    m = re.search(r"what(?:'s|\s+is)\s+(.+?)\s+in\s+(\w[\w\s]*?)$", t)
-    if m:
-        source_raw = m.group(1).strip()
-        target_unit_raw = m.group(2).strip()
-        return _do_conversion(source_raw, target_unit_raw)
-
-    return None
-
-
-def _do_conversion(source_raw, target_unit_raw):
-    """Parse source quantity + unit and target unit, perform conversion."""
-    target_unit = _resolve_unit(target_unit_raw)
-
-    # Parse source: try to split into number + unit
-    # "a quarter cup", "3 tablespoons", "72 fahrenheit", "a liter"
-    source_val, source_unit = _split_quantity(source_raw)
-    if source_val is None or source_unit is None:
-        return None
-
-    source_unit = _resolve_unit(source_unit)
-
-    try:
-        if _is_temperature(source_unit) or _is_temperature(target_unit):
-            result = _ureg.Quantity(source_val, source_unit).to(target_unit)
-        else:
-            result = (_ureg.Quantity(source_val, source_unit)).to(target_unit)
-
-        result_val = result.magnitude
-        src_unit_name = _fmt_unit(source_unit, source_val)
-        dst_unit_name = _fmt_unit(target_unit, result_val)
-        if _is_temperature(source_unit) or _is_temperature(target_unit):
-            return (f"{_fmt_number(source_val)} {src_unit_name} "
-                    f"is {_fmt_number(result_val)} {dst_unit_name}.")
-        return (f"There are {_fmt_number(result_val)} {dst_unit_name} "
-                f"in {_fmt_number(source_val)} {src_unit_name}.")
-    except Exception:
-        return None
-
+# --- Unit conversion parsing ---
 
 def _split_quantity(text):
     """Split 'a quarter cup' into (0.25, 'cup'). Returns (value, unit_str) or (None, None)."""
@@ -279,7 +223,56 @@ def _split_quantity(text):
     return None, None
 
 
-# --- Math expressions ---
+def _parse_unit_conversion(text):
+    """Try to parse a unit conversion query.
+
+    Returns (value, from_unit, to_unit) or None.
+    """
+    t = text.lower().strip().rstrip("?.")
+
+    # Pattern: "how many X in (a/an/N) Y"
+    m = re.search(r"how\s+many\s+(\w[\w\s]*?)\s+(?:are\s+)?in\s+(.+)", t)
+    if m:
+        target_unit_raw = m.group(1).strip()
+        source_raw = m.group(2).strip()
+        return _parse_conversion_pair(source_raw, target_unit_raw)
+
+    # Pattern: "convert N X to Y"
+    m = re.search(r"convert\s+(.+?)\s+to\s+(\w[\w\s]*?)$", t)
+    if m:
+        source_raw = m.group(1).strip()
+        target_unit_raw = m.group(2).strip()
+        return _parse_conversion_pair(source_raw, target_unit_raw)
+
+    # Pattern: "what is N X in Y"
+    m = re.search(r"what(?:'s|\s+is)\s+(.+?)\s+in\s+(\w[\w\s]*?)$", t)
+    if m:
+        source_raw = m.group(1).strip()
+        target_unit_raw = m.group(2).strip()
+        return _parse_conversion_pair(source_raw, target_unit_raw)
+
+    return None
+
+
+def _parse_conversion_pair(source_raw, target_unit_raw):
+    """Parse source quantity + unit and target unit.
+
+    Returns (value, from_unit, to_unit) or None.
+    """
+    target_unit = _resolve_unit(target_unit_raw)
+    source_val, source_unit_raw = _split_quantity(source_raw)
+    if source_val is None or source_unit_raw is None:
+        return None
+    source_unit = _resolve_unit(source_unit_raw)
+    # Validate units
+    try:
+        _ureg.Quantity(source_val, source_unit).to(target_unit)
+    except Exception:
+        return None
+    return (source_val, source_unit, target_unit)
+
+
+# --- Math expression parsing ---
 
 _MATH_OPS = {
     "plus": "+", "and": "+",
@@ -290,8 +283,11 @@ _MATH_OPS = {
 }
 
 
-def _try_math(text):
-    """Try to parse and evaluate a math expression. Returns response string or None."""
+def _parse_math(text):
+    """Try to parse a math expression.
+
+    Returns (command, args_dict) or None.
+    """
     t = text.lower().strip().rstrip("?.")
 
     # "square root of N"
@@ -299,24 +295,21 @@ def _try_math(text):
     if m:
         n = _parse_number(m.group(1))
         if n is not None:
-            result = math.sqrt(n)
-            return f"The square root of {_fmt_number(n)} is {_fmt_number(result)}."
+            return ("sqrt", {"n": n})
 
     # "N squared"
     m = re.search(r"([\d,]+(?:\.\d+)?)\s+squared", t)
     if m:
         n = _parse_number(m.group(1))
         if n is not None:
-            result = n ** 2
-            return f"{_fmt_number(n)} squared is {_fmt_number(result)}."
+            return ("power", {"n": n, "exp": 2})
 
     # "N cubed"
     m = re.search(r"([\d,]+(?:\.\d+)?)\s+cubed", t)
     if m:
         n = _parse_number(m.group(1))
         if n is not None:
-            result = n ** 3
-            return f"{_fmt_number(n)} cubed is {_fmt_number(result)}."
+            return ("power", {"n": n, "exp": 3})
 
     # "N% of M"
     m = re.search(r"([\d,]+(?:\.\d+)?)\s*%\s*(?:of\s+)?([\d,]+(?:\.\d+)?)", t)
@@ -324,8 +317,7 @@ def _try_math(text):
         pct = _parse_number(m.group(1))
         base = _parse_number(m.group(2))
         if pct is not None and base is not None:
-            result = (pct / 100) * base
-            return f"{_fmt_number(pct)}% of {_fmt_number(base)} is {_fmt_number(result)}."
+            return ("percent", {"pct": pct, "base": base})
 
     # "N percent of M" (Whisper spells it out)
     m = re.search(r"([\d,]+(?:\.\d+)?)\s+percent\s+of\s+([\d,]+(?:\.\d+)?)", t)
@@ -333,8 +325,7 @@ def _try_math(text):
         pct = _parse_number(m.group(1))
         base = _parse_number(m.group(2))
         if pct is not None and base is not None:
-            result = (pct / 100) * base
-            return f"{_fmt_number(pct)} percent of {_fmt_number(base)} is {_fmt_number(result)}."
+            return ("percent", {"pct": pct, "base": base})
 
     # Binary operations: "N op M"
     # Try multi-word ops first, then single-word
@@ -345,10 +336,7 @@ def _try_math(text):
             a = _parse_number(m.group(1))
             b = _parse_number(m.group(2))
             if a is not None and b is not None:
-                if op_sym == "/" and b == 0:
-                    return "I can't divide by zero."
-                result = eval(f"{a} {op_sym} {b}")
-                return f"{_fmt_number(a)} {op_word} {_fmt_number(b)} is {_fmt_number(result)}."
+                return ("binary_op", {"a": a, "b": b, "op": op_sym, "op_word": op_word})
 
     return None
 
@@ -376,35 +364,100 @@ def _classify(text):
     return None
 
 
-def score(text):
+def parse(text):
     cls = _classify(text)
-    if cls is not None:
-        return 0.9
-    return 0.0
-
-
-def handle(text):
-    cls = _classify(text)
+    if cls is None:
+        return None
 
     if cls == "unit":
-        result = _try_unit_conversion(text)
+        result = _parse_unit_conversion(text)
         if result:
-            return result
-        # Fall through to try math in case classification was wrong
-        result = _try_math(text)
+            value, from_unit, to_unit = result
+            return Parse(command="convert_units", score=0.9,
+                         args={"value": value, "from_unit": from_unit, "to_unit": to_unit})
+        # Fall through to try math
+        result = _parse_math(text)
         if result:
-            return result
-        return "Sorry, I couldn't figure out that conversion."
+            command, args = result
+            return Parse(command=command, score=0.9, args=args)
+        # Classified as unit but couldn't parse — still return a parse
+        return Parse(command="convert_units", score=0.9, args={})
 
     if cls == "math":
-        result = _try_math(text)
+        result = _parse_math(text)
         if result:
-            return result
+            command, args = result
+            return Parse(command=command, score=0.9, args=args)
         # Fall through to try units
-        result = _try_unit_conversion(text)
+        result = _parse_unit_conversion(text)
         if result:
-            return result
-        return "Sorry, I couldn't figure out that calculation."
+            value, from_unit, to_unit = result
+            return Parse(command="convert_units", score=0.9,
+                         args={"value": value, "from_unit": from_unit, "to_unit": to_unit})
+        # Classified as math but couldn't parse
+        return Parse(command="binary_op", score=0.9, args={})
+
+    return None
+
+
+def handle(p):
+    if p.command == "convert_units":
+        value = p.args.get("value")
+        from_unit = p.args.get("from_unit")
+        to_unit = p.args.get("to_unit")
+        if value is None or from_unit is None or to_unit is None:
+            return "Sorry, I couldn't figure out that conversion."
+        try:
+            result = _ureg.Quantity(value, from_unit).to(to_unit)
+            result_val = result.magnitude
+            src_unit_name = _fmt_unit(from_unit, value)
+            dst_unit_name = _fmt_unit(to_unit, result_val)
+            if _is_temperature(from_unit) or _is_temperature(to_unit):
+                return (f"{_fmt_number(value)} {src_unit_name} "
+                        f"is {_fmt_number(result_val)} {dst_unit_name}.")
+            return (f"There are {_fmt_number(result_val)} {dst_unit_name} "
+                    f"in {_fmt_number(value)} {src_unit_name}.")
+        except Exception:
+            return "Sorry, I couldn't figure out that conversion."
+
+    elif p.command == "sqrt":
+        n = p.args.get("n")
+        if n is None:
+            return "Sorry, I couldn't figure out that calculation."
+        result = math.sqrt(n)
+        return f"The square root of {_fmt_number(n)} is {_fmt_number(result)}."
+
+    elif p.command == "power":
+        n = p.args.get("n")
+        exp = p.args.get("exp")
+        if n is None or exp is None:
+            return "Sorry, I couldn't figure out that calculation."
+        result = n ** exp
+        if exp == 2:
+            return f"{_fmt_number(n)} squared is {_fmt_number(result)}."
+        elif exp == 3:
+            return f"{_fmt_number(n)} cubed is {_fmt_number(result)}."
+        return f"{_fmt_number(n)} to the power of {exp} is {_fmt_number(result)}."
+
+    elif p.command == "percent":
+        pct = p.args.get("pct")
+        base = p.args.get("base")
+        if pct is None or base is None:
+            return "Sorry, I couldn't figure out that calculation."
+        result = (pct / 100) * base
+        return f"{_fmt_number(pct)}% of {_fmt_number(base)} is {_fmt_number(result)}."
+
+    elif p.command == "binary_op":
+        a = p.args.get("a")
+        b = p.args.get("b")
+        op = p.args.get("op")
+        op_word = p.args.get("op_word")
+        if a is None or b is None or op is None:
+            return "Sorry, I couldn't figure out that calculation."
+        if op == "/" and b == 0:
+            return "I can't divide by zero."
+        result = eval(f"{a} {op} {b}")
+        return f"{_fmt_number(a)} {op_word} {_fmt_number(b)} is {_fmt_number(result)}."
 
     return "Sorry, I didn't understand that."
 
@@ -439,11 +492,8 @@ if __name__ == "__main__":
         "what is 2 to the power of 8",
     ]
     for t in tests:
-        cls = _classify(t)
-        if cls == "unit":
-            result = _try_unit_conversion(t)
-        elif cls == "math":
-            result = _try_math(t)
+        result = parse(t)
+        if result:
+            print(f"  {t!r:55s} => {result.command} {result.args}")
         else:
-            result = None
-        print(f"  [{cls or '?':4s}] {t!r:55s} => {result}")
+            print(f"  {t!r:55s} => None")

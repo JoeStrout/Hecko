@@ -18,6 +18,8 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 
+from hecko.commands.parse import Parse
+
 # --- Team registry ---
 # Each entry has: sport path, team_id, names, aliases (specific team match),
 # and sport_keywords (match when no team name given).
@@ -247,26 +249,28 @@ def _classify(text):
     return ("next_game", teams)
 
 
-def score(text):
-    result = _classify(text)
-    if result is not None:
-        return 0.9
-    return 0.0
-
-
-def handle(text):
+def parse(text):
     result = _classify(text)
     if result is None:
-        return "Sorry, I didn't understand that sports question."
-
+        return None
     action, teams = result
+    command_map = {
+        "next_game": "next_game", "this_week": "this_week",
+        "next_week": "next_week", "last_game": "last_game",
+    }
+    return Parse(command=command_map[action], score=0.9,
+                 args={"teams": teams})
+
+
+def handle(p):
+    teams = p.args.get("teams", [])
     responses = []
 
     for team in teams:
         try:
             data = _fetch_schedule(team["sport"], team["team_id"])
 
-            if action == "next_game":
+            if p.command == "next_game":
                 resp = _find_next_game(data, team["short_name"])
                 if resp:
                     responses.append(resp)
@@ -274,7 +278,7 @@ def handle(text):
                     responses.append(
                         f"I couldn't find any upcoming {team['short_name']} games.")
 
-            elif action == "this_week":
+            elif p.command == "this_week":
                 now = datetime.now().astimezone()
                 start = now
                 # End of this week (next Sunday at midnight)
@@ -289,7 +293,7 @@ def handle(text):
                     responses.append(
                         f"No {team['short_name']} games this week.")
 
-            elif action == "next_week":
+            elif p.command == "next_week":
                 now = datetime.now().astimezone()
                 # Next Sunday
                 days_until_sunday = (6 - now.weekday()) % 7 + 1
@@ -304,7 +308,7 @@ def handle(text):
                     responses.append(
                         f"No {team['short_name']} games next week.")
 
-            elif action == "last_game":
+            elif p.command == "last_game":
                 resp = _find_last_game(data, team["short_name"])
                 if resp:
                     responses.append(resp)
@@ -339,10 +343,10 @@ if __name__ == "__main__":
         "when's the next game",
     ]
     for t in tests:
-        cls = _classify(t)
-        if cls:
-            team_names = ", ".join(tm["short_name"] for tm in cls[1])
-            print(f"  {t!r:55s} => {cls[0]}, [{team_names}]")
+        result = parse(t)
+        if result:
+            team_names = ", ".join(tm["short_name"] for tm in result.args["teams"])
+            print(f"  {t!r:55s} => {result.command}, [{team_names}]")
         else:
             print(f"  {t!r:55s} => None")
 
@@ -356,5 +360,9 @@ if __name__ == "__main__":
     ]
     for t in live_tests:
         print(f"  Q: {t}")
-        print(f"  A: {handle(t)}")
+        p = parse(t)
+        if p:
+            print(f"  A: {handle(p)}")
+        else:
+            print(f"  A: (no parse)")
         print()

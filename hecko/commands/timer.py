@@ -12,6 +12,8 @@ import re
 import threading
 import time
 
+from hecko.commands.parse import Parse
+
 # Active timers: {label: {"end": timestamp, "duration_sec": int}}
 _timers = {}
 _lock = threading.Lock()
@@ -146,7 +148,7 @@ def _format_time_remaining(seconds):
 # --- Command scoring and handling ---
 
 def _classify(text):
-    """Classify the command type: 'set', 'query', 'cancel', or None."""
+    """Classify the command type: 'set', 'query', 'cancel', 'cancel_all', or None."""
     t = text.lower()
     if re.search(r"\bcancel\b.*\btimer", t) or re.search(r"\bstop\b.*\btimer", t):
         if re.search(r"\ball\b", t):
@@ -159,31 +161,48 @@ def _classify(text):
     return None
 
 
-def score(text):
+def parse(text):
     cmd = _classify(text)
     if cmd is not None:
-        return 0.9
+        if cmd == "set":
+            result = _parse_duration(text)
+            if result is None:
+                # We know it's a set command but can't parse duration
+                return Parse(command="set_timer", score=0.9, args={})
+            seconds, label = result
+            return Parse(command="set_timer", score=0.9,
+                         args={"seconds": seconds, "label": label})
+        elif cmd == "query":
+            return Parse(command="query_timers", score=0.9)
+        elif cmd == "cancel_all":
+            return Parse(command="cancel_all_timers", score=0.9)
+        elif cmd == "cancel":
+            result = _parse_duration(text)
+            args = {}
+            if result:
+                _, label = result
+                args["label"] = label
+            return Parse(command="cancel_timer", score=0.9, args=args)
+
     # Weak match: mentions "timer" at all
     if "timer" in text.lower():
-        return 0.5
-    return 0.0
+        return Parse(command="set_timer", score=0.5, args={})
+    return None
 
 
-def handle(text):
+def handle(p):
     _start_checker()
 
-    cmd = _classify(text)
-
-    if cmd == "set":
-        result = _parse_duration(text)
-        if result is None:
+    if p.command == "set_timer":
+        seconds = p.args.get("seconds")
+        label = p.args.get("label")
+        if seconds is None:
             return "Sorry, I didn't understand the duration."
-        seconds, label = result
         with _lock:
             _timers[label] = {"end": time.time() + seconds, "duration_sec": seconds}
         return f"Timer set for {_format_time_remaining(seconds)}."
 
-    elif cmd == "query":
+    elif p.command == "query_timers":
         with _lock:
             if not _timers:
                 return "There are currently no timers set."
@@ -198,7 +217,7 @@ def handle(text):
             return f"You have {parts[0]}."
         return "You have " + ", and ".join([", ".join(parts[:-1]), parts[-1]]) + "."
 
-    elif cmd == "cancel_all":
+    elif p.command == "cancel_all_timers":
         with _lock:
             count = len(_timers)
             _timers.clear()
@@ -206,11 +225,9 @@ def handle(text):
             return "You don't have any timers to cancel."
         return f"All {count} timer{'s' if count != 1 else ''} canceled."
 
-    elif cmd == "cancel":
-        # Try to match the duration mentioned to an active timer
-        result = _parse_duration(text)
-        if result:
-            _, label = result
+    elif p.command == "cancel_timer":
+        label = p.args.get("label")
+        if label:
             with _lock:
                 if label in _timers:
                     del _timers[label]
@@ -226,3 +243,23 @@ def handle(text):
         return "Which timer do you want to cancel?"
 
     return "Sorry, I didn't understand that timer command."
+
+
+# --- Standalone test ---
+
+if __name__ == "__main__":
+    tests = [
+        "set a timer for 5 minutes",
+        "set a 30 second timer",
+        "set a timer for one hour",
+        "set a timer for 2 and a half minutes",
+        "how much time is left",
+        "cancel the 5 minute timer",
+        "cancel all timers",
+    ]
+    for t in tests:
+        result = parse(t)
+        if result:
+            print(f"  {t!r:50s} => {result.command} {result.args}")
+        else:
+            print(f"  {t!r:50s} => None")

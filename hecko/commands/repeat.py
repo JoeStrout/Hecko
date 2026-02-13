@@ -10,6 +10,8 @@ Handles:
 
 import re
 
+from hecko.commands.parse import Parse
+
 _PATTERNS = re.compile(
     r"\b(?:"
     r"say\s+that\s+again"
@@ -27,13 +29,13 @@ _PATTERNS = re.compile(
     re.IGNORECASE)
 
 
-def score(text):
+def parse(text):
     if _PATTERNS.search(text):
-        return 0.95
-    return 0.0
+        return Parse(command="repeat", score=0.95)
+    return None
 
 
-def handle(text):
+def handle(p):
     from hecko.commands.router import last_response
     if last_response:
         return last_response
@@ -57,5 +59,8 @@ if __name__ == "__main__":
         "hello",
     ]
     for t in tests:
-        s = score(t)
-        print(f"  {t!r:45s} => score={s}")
+        result = parse(t)
+        if result:
+            print(f"  {t!r:45s} => {result.command} (score={result.score})")
+        else:
+            print(f"  {t!r:45s} => None")

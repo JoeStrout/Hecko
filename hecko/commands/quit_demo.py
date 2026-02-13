@@ -2,6 +2,8 @@
 
 from difflib import SequenceMatcher
 
+from hecko.commands.parse import Parse
+
 _PHRASES = [
     "quit demo",
     "exit demo",
@@ -21,19 +23,21 @@ _PHRASES = [
 quit_requested = False
 
 
-def score(text):
+def parse(text):
     t = text.lower().strip().rstrip(".")
-    # Check exact matches and close fuzzy matches
+    best_score = 0.0
     for phrase in _PHRASES:
         if t == phrase:
-            return 1.0
+            return Parse(command="quit", score=1.0)
         ratio = SequenceMatcher(None, t, phrase).ratio()
-        if ratio > 0.75:
-            return ratio
-    return 0.0
+        if ratio > best_score:
+            best_score = ratio
+    if best_score > 0.75:
+        return Parse(command="quit", score=best_score)
+    return None
 
 
-def handle(text):
+def handle(p):
     global quit_requested
     quit_requested = True
     return "Goodbye!"

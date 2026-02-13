@@ -13,6 +13,8 @@ import threading
 import time
 from datetime import datetime, timedelta
 
+from hecko.commands.parse import Parse
+
 # Active reminders: [{time: datetime, text: str, original: str}, ...]
 _reminders = []
 _lock = threading.Lock()
@@ -287,34 +289,45 @@ def _classify(text):
     return None
 
 
-def score(text):
+def parse(text):
     cmd = _classify(text)
     if cmd is not None:
-        return 0.9
+        if cmd == "set":
+            reminder_text, reminder_time = _extract_reminder(text)
+            if reminder_text and reminder_time:
+                return Parse(command="set_reminder", score=0.9,
+                             args={"text": reminder_text, "time": reminder_time})
+            # Recognized as set but couldn't parse
+            return Parse(command="set_reminder", score=0.9, args={})
+        elif cmd == "query":
+            return Parse(command="query_reminders", score=0.9)
+        elif cmd == "cancel_all":
+            return Parse(command="cancel_all_reminders", score=0.9)
+        elif cmd == "cancel":
+            return Parse(command="cancel_reminder", score=0.9)
+
     if re.search(r"\bremind", text.lower()):
-        return 0.5
-    return 0.0
+        return Parse(command="set_reminder", score=0.5, args={})
+    return None
 
 
-def handle(text):
+def handle(p):
     _start_checker()
 
-    cmd = _classify(text)
-
-    if cmd == "set":
-        reminder_text, reminder_time = _extract_reminder(text)
+    if p.command == "set_reminder":
+        reminder_text = p.args.get("text")
+        reminder_time = p.args.get("time")
         if reminder_text and reminder_time:
             with _lock:
                 _reminders.append({
                     "time": reminder_time,
                     "text": reminder_text,
-                    "original": text,
                 })
             time_str = reminder_time.strftime("%-I:%M %p")
             return f"OK, I'll remind you to {reminder_text} at {time_str}."
         return "Sorry, I didn't understand the time for that reminder."
 
-    elif cmd == "query":
+    elif p.command == "query_reminders":
         with _lock:
             if not _reminders:
                 return "You don't have any reminders set."
@@ -327,7 +340,7 @@ def handle(text):
         listing = ", and ".join([", ".join(parts[:-1]), parts[-1]])
         return f"You have {len(parts)} reminders: {listing}."
 
-    elif cmd == "cancel_all":
+    elif p.command == "cancel_all_reminders":
         with _lock:
             count = len(_reminders)
             _reminders.clear()
@@ -335,7 +348,7 @@ def handle(text):
             return "You don't have any reminders to cancel."
         return f"All {count} reminder{'s' if count != 1 else ''} canceled."
 
-    elif cmd == "cancel":
+    elif p.command == "cancel_reminder":
         # For now, cancel the next upcoming one
         with _lock:
             if not _reminders:
@@ -346,3 +359,22 @@ def handle(text):
         return f"Canceled your reminder to {removed['text']} at {time_str}."
 
     return "Sorry, I didn't understand that reminder command."
+
+
+# --- Standalone test ---
+
+if __name__ == "__main__":
+    tests = [
+        "remind me to feed the cat at 3pm",
+        "remind me at 12:30 to call my mom",
+        "remind me to take my pills at 6 o'clock in the morning",
+        "what reminders do I have",
+        "cancel all reminders",
+        "cancel my next reminder",
+    ]
+    for t in tests:
+        result = parse(t)
+        if result:
+            print(f"  {t!r:60s} => {result.command} {result.args}")
+        else:
+            print(f"  {t!r:60s} => None")

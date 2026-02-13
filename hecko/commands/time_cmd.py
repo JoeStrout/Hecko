@@ -10,6 +10,8 @@ Handles:
 import re
 from datetime import datetime
 
+from hecko.commands.parse import Parse
+
 
 def _classify(text):
     """Classify: 'time', 'day', 'date', or None."""
@@ -23,19 +25,21 @@ def _classify(text):
     return None
 
 
-def score(text):
+def parse(text):
     t = text.lower()
-    # Must ask a question about time/day/date
-    if re.search(r"\b(what|tell me)\b", t) and _classify(t) is not None:
-        return 0.9
-    return 0.0
+    if not re.search(r"\b(what|tell me)\b", t):
+        return None
+    cls = _classify(t)
+    if cls is None:
+        return None
+    command_map = {"time": "get_time", "date": "get_date", "day": "get_day"}
+    return Parse(command=command_map[cls], score=0.9)
 
 
-def handle(text):
+def handle(p):
     now = datetime.now()
-    cmd = _classify(text)
 
-    if cmd == "time":
+    if p.command == "get_time":
         hour = now.hour % 12 or 12
         minute = now.minute
         ampm = "AM" if now.hour < 12 else "PM"
@@ -46,10 +50,29 @@ def handle(text):
         else:
             return f"It's {hour} {minute} {ampm}."
 
-    elif cmd == "date":
+    elif p.command == "get_date":
         return f"Today is {now.strftime('%A, %B')} {now.day}, {now.year}."
 
-    elif cmd == "day":
+    elif p.command == "get_day":
         return f"Today is {now.strftime('%A, %B')} {now.day}."
 
     return f"It's {now.strftime('%I:%M %p')}."
+
+
+# --- Standalone test ---
+
+if __name__ == "__main__":
+    tests = [
+        "what time is it",
+        "what day is it",
+        "what is the date",
+        "what's today's date",
+        "tell me the time",
+        "hello",
+    ]
+    for t in tests:
+        result = parse(t)
+        if result:
+            print(f"  {t!r:40s} => {result.command} (score={result.score})")
+        else:
+            print(f"  {t!r:40s} => None")

@@ -1,8 +1,8 @@
-"""Command router: scores all registered commands and dispatches to the best match.
+"""Command router: parses input with all registered commands, dispatches to best match.
 
 Each command module must provide:
-    score(text: str) -> float    # 0.0–1.0, how confident this command matches
-    handle(text: str) -> str     # execute the command, return response text
+    parse(text: str) -> Parse | None   # classify + extract args, return None if no match
+    handle(parse: Parse) -> str        # execute the command using pre-extracted args
 """
 
 _commands = []
@@ -10,7 +10,7 @@ last_response = None  # most recent command response, for "say that again"
 
 
 def register(command_module):
-    """Register a command module (must have score and handle functions)."""
+    """Register a command module (must have parse and handle functions)."""
     _commands.append(command_module)
 
 
@@ -22,29 +22,29 @@ def dispatch(text):
 
     Returns:
         (response, scores): response text and a list of (name, score) tuples
-        for all commands that returned a nonzero score, sorted descending.
+        for all commands that returned a non-None parse, sorted descending.
     """
-    scores = []
+    parses = []
 
     for cmd in _commands:
-        s = cmd.score(text)
-        if s > 0.0:
-            scores.append((cmd.__name__.split(".")[-1], s))
+        p = cmd.parse(text)
+        if p is not None:
+            p.module = cmd
+            parses.append(p)
 
-    scores.sort(key=lambda x: -x[1])
+    if not parses:
+        return f"I heard you say: {text}", []
 
-    if scores:
-        best_name = scores[0][0]
-        best_cmd = None
-        for cmd in _commands:
-            if cmd.__name__.split(".")[-1] == best_name:
-                best_cmd = cmd
-                break
-        response = best_cmd.handle(text)
-        # Don't overwrite last_response if this was a repeat command
-        if best_name != "repeat":
-            global last_response
-            last_response = response
-        return response, scores
+    parses.sort(key=lambda p: -p.score)
 
-    return f"I heard you say: {text}", []
+    scores = [(p.module.__name__.split(".")[-1], p.score) for p in parses]
+
+    best = parses[0]
+    response = best.module.handle(best)
+
+    # Don't overwrite last_response if this was a repeat command
+    if best.module.__name__.split(".")[-1] != "repeat":
+        global last_response
+        last_response = response
+
+    return response, scores

@@ -14,12 +14,19 @@ Also accepts "tell Our Groceries to ..." or "ask Our Groceries ..." prefix.
 
 import asyncio
 import re
+import time
 from ourgroceries import OurGroceries
 from hecko.og_credentials import OG_USERNAME, OG_PASSWORD
+from hecko.commands.parse import Parse
 
 # Cached client and list ID
 _og = None
 _list_id = None
+
+# Items cache: avoid hammering the Our Groceries API on every command
+_items_cache = None   # cached list of items
+_items_cache_ts = 0   # timestamp of last fetch
+_ITEMS_CACHE_TTL = 120  # seconds — refetch after 2 minutes
 
 # Star prefix used to mark items as important
 _STAR = "\u2b50 "
@@ -49,12 +56,30 @@ async def _get_list_id():
     return _list_id
 
 
-async def _get_items():
-    """Get all non-crossed-off items from the Shopping List."""
+async def _get_items(force=False):
+    """Get items from the Shopping List, using cache when possible.
+
+    The Our Groceries team asks that we avoid unnecessary API calls.
+    We cache the item list and only refetch after _ITEMS_CACHE_TTL seconds
+    or when force=True (after we mutate the list).
+    """
+    global _items_cache, _items_cache_ts
+    now = time.time()
+    if not force and _items_cache is not None and (now - _items_cache_ts) < _ITEMS_CACHE_TTL:
+        return _items_cache
+
     og = await _get_client()
     list_id = await _get_list_id()
     result = await og.get_list_items(list_id)
-    return result.get("list", {}).get("items", [])
+    _items_cache = result.get("list", {}).get("items", [])
+    _items_cache_ts = now
+    return _items_cache
+
+
+def _invalidate_cache():
+    """Invalidate the items cache after a mutation (add/remove)."""
+    global _items_cache
+    _items_cache = None
 
 
 def _find_item(items, name):
@@ -88,6 +113,7 @@ async def _add_item(item_name, important=False):
     list_id = await _get_list_id()
     value = (_STAR + item_name) if important else item_name
     await og.add_item_to_list(list_id, value, auto_category=True)
+    _invalidate_cache()
     suffix = " and marked it important" if important else ""
     return f"I've added {item_name} to the shopping list{suffix}."
 
@@ -102,6 +128,7 @@ async def _remove_item(item_name):
     og = await _get_client()
     list_id = await _get_list_id()
     await og.remove_item_from_list(list_id, existing["id"])
+    _invalidate_cache()
     return f"I've removed {item_name} from the shopping list."
 
 
@@ -241,34 +268,39 @@ def _classify(text):
     return None
 
 
-def score(text):
+def parse(text):
     t, had_prefix = _strip_prefix(text)
     result = _classify(text)
     if result is not None:
-        return 0.9
+        action, item_name, important = result
+        command_map = {
+            "add": "add_item", "remove": "remove_item",
+            "check": "check_item", "count": "count_items",
+        }
+        args = {}
+        if item_name is not None:
+            args["item_name"] = item_name
+        if action == "add":
+            args["important"] = important
+        return Parse(command=command_map[action], score=0.9, args=args)
+
     # Weak match: mentions shopping/grocery list at all
     if re.search(_LIST_WORDS, t, re.IGNORECASE):
-        return 0.4
+        return None  # recognized topic but can't classify action
     if re.search(r"\b(?:our|their|are|the)\s+groceries\b", text, re.IGNORECASE):
-        return 0.4
-    return 0.0
+        return None
+    return None
 
 
-def handle(text):
-    result = _classify(text)
-    if result is None:
-        return "Sorry, I didn't understand that grocery list command."
-
-    action, item_name, important = result
-
+def handle(p):
     try:
-        if action == "add":
-            return asyncio.run(_add_item(item_name, important))
-        elif action == "remove":
-            return asyncio.run(_remove_item(item_name))
-        elif action == "check":
-            return asyncio.run(_check_item(item_name))
-        elif action == "count":
+        if p.command == "add_item":
+            return asyncio.run(_add_item(p.args["item_name"], p.args.get("important", False)))
+        elif p.command == "remove_item":
+            return asyncio.run(_remove_item(p.args["item_name"]))
+        elif p.command == "check_item":
+            return asyncio.run(_check_item(p.args["item_name"]))
+        elif p.command == "count_items":
             return asyncio.run(_count_items())
     except Exception as e:
         return f"Sorry, I had trouble reaching Our Groceries: {e}"
@@ -299,5 +331,8 @@ if __name__ == "__main__":
         "tell our groceries how many items",
     ]
     for t in tests:
-        result = _classify(t)
-        print(f"  {t!r:60s} => {result}")
+        result = parse(t)
+        if result:
+            print(f"  {t!r:60s} => {result.command} {result.args}")
+        else:
+            print(f"  {t!r:60s} => None")

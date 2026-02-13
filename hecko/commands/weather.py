@@ -12,6 +12,8 @@ import json
 import re
 import urllib.request
 
+from hecko.commands.parse import Parse
+
 # Tucson, AZ (85718)
 _LAT = 32.22174
 _LON = -110.92648
@@ -79,20 +81,20 @@ def _classify(text):
     return None
 
 
-def score(text):
-    cmd = _classify(text)
-    if cmd is not None:
-        return 0.9
-    return 0.0
+def parse(text):
+    cls = _classify(text)
+    if cls is None:
+        return None
+    command_map = {"current": "current_weather", "forecast": "forecast", "rain": "rain_check"}
+    return Parse(command=command_map[cls], score=0.9)
 
 
-def handle(text):
+def handle(p):
     try:
         data = _fetch_weather()
     except Exception as e:
         return f"Sorry, I couldn't get the weather. {e}"
 
-    cmd = _classify(text)
     current = data["current"]
     daily = data["daily"]
 
@@ -102,7 +104,7 @@ def handle(text):
     wind = round(current["wind_speed_10m"])
     conditions = _describe_weather_code(current["weather_code"])
 
-    if cmd == "current" or cmd is None:
+    if p.command == "current_weather":
         response = (
             f"It's currently {temp} degrees in {_LOCATION} with {conditions}. "
             f"Feels like {feels_like}. "
@@ -114,7 +116,7 @@ def handle(text):
         response += f"Today's high is {hi}, low {lo}."
         return response
 
-    elif cmd == "forecast":
+    elif p.command == "forecast":
         _DAYS = ["Today", "Tomorrow", "The day after"]
         parts = []
         for i in range(3):
@@ -128,7 +130,7 @@ def handle(text):
             parts.append(part)
         return ". ".join(parts) + "."
 
-    elif cmd == "rain":
+    elif p.command == "rain_check":
         precip_today = daily["precipitation_probability_max"][0]
         precip_tomorrow = daily["precipitation_probability_max"][1]
         if precip_today > 50:

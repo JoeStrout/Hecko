@@ -3,6 +3,8 @@
 import re
 from datetime import datetime
 
+from hecko.commands.parse import Parse
+
 _GREETINGS = [
     "hello", "hi", "hey", "howdy", "greetings",
     "good morning", "good afternoon", "good evening",
@@ -39,40 +41,26 @@ _welcome_idx = 0
 _farewell_idx = 0
 
 
-def _classify(text):
-    """Classify: 'greeting', 'thanks', 'goodbye', or None."""
+def parse(text):
     t = text.lower().strip()
 
     if _THANKS.search(t):
-        return "thanks"
+        return Parse(command="respond_thanks", score=0.9)
     if _GOODBYE.search(t):
-        return "goodbye"
+        return Parse(command="respond_goodbye", score=0.9)
 
-    for g in _GREETINGS:
-        if t == g or t == g + " alexa" or t.startswith(g) or g in t:
-            return "greeting"
-
-    return None
-
-
-def score(text):
-    cls = _classify(text)
-    if cls is None:
-        return 0.0
-    t = text.lower().strip()
-    if cls == "thanks" or cls == "goodbye":
-        return 0.9
-    # Greeting scoring (preserve original logic)
+    # Greeting scoring
     for g in _GREETINGS:
         if t == g or t == g + " alexa":
-            return 1.0
+            return Parse(command="greet", score=1.0)
     for g in _GREETINGS:
         if t.startswith(g):
-            return 0.8
+            return Parse(command="greet", score=0.8)
     for g in _GREETINGS:
         if g in t:
-            return 0.4
-    return 0.4
+            return Parse(command="greet", score=0.4)
+
+    return None
 
 
 def _time_of_day():
@@ -85,19 +73,34 @@ def _time_of_day():
         return "evening"
 
 
-def handle(text):
+def handle(p):
     global _welcome_idx, _farewell_idx
 
-    cls = _classify(text)
-
-    if cls == "thanks":
+    if p.command == "respond_thanks":
         resp = _YOURE_WELCOME[_welcome_idx % len(_YOURE_WELCOME)]
         _welcome_idx += 1
         return resp
 
-    if cls == "goodbye":
+    if p.command == "respond_goodbye":
         resp = _FAREWELL[_farewell_idx % len(_FAREWELL)]
         _farewell_idx += 1
         return resp
 
     return f"Good {_time_of_day()}! How can I help you?"
+
+
+# --- Standalone test ---
+
+if __name__ == "__main__":
+    tests = [
+        "hello", "hi", "hey alexa", "good morning",
+        "thank you", "thanks", "goodbye", "see you later",
+        "I'm done", "that's all", "that will be all",
+        "what's the weather",
+    ]
+    for t in tests:
+        result = parse(t)
+        if result:
+            print(f"  {t!r:40s} => {result.command} (score={result.score})")
+        else:
+            print(f"  {t!r:40s} => None")
