@@ -1,2 +1,7 @@
 #!/bin/bash
-exec /Users/jstrout/.local/bin/micromamba run -n hecko python -m hecko "$@"
+if [ "$1" = "-test" ]; then
+    shift
+    exec /Users/jstrout/.local/bin/micromamba run -n hecko python -m pytest tests/ "$@"
+else
+    exec /Users/jstrout/.local/bin/micromamba run -n hecko python -m hecko "$@"
+fi

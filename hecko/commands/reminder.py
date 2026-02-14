@@ -107,18 +107,35 @@ def _start_checker():
 
 # --- Time parsing ---
 
+_WORD_NUMBERS = {
+    "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+    "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+    "eleven": "11", "twelve": "12",
+}
+
+_WORD_NUM_RE = re.compile(
+    r"\b(" + "|".join(_WORD_NUMBERS.keys()) + r")\b", re.IGNORECASE
+)
+
+
+def _replace_word_numbers(text):
+    """Replace word numbers (one-twelve) with digits."""
+    return _WORD_NUM_RE.sub(lambda m: _WORD_NUMBERS[m.group(1).lower()], text)
+
+
 def parse_time(text):
     """Parse a time expression from text, returning the next occurrence as a datetime.
 
     Handles:
         "3pm", "3 pm", "3:30pm", "12:30", "6 o'clock in the morning",
         "6 o'clock", "noon", "midnight", "3 in the afternoon",
-        "6 in the morning", "10 at night"
+        "6 in the morning", "10 at night",
+        "one o'clock", "two thirty pm" (word numbers one-twelve)
 
     Returns:
         datetime or None
     """
-    t = text.lower().strip()
+    t = _replace_word_numbers(text.lower().strip())
 
     # "noon"
     if re.search(r"\bnoon\b", t):
@@ -184,6 +201,8 @@ def parse_time(text):
     if m:
         hour = int(m.group(1))
         hour = _apply_ampm(hour, "", t)
+        if not re.search(r"in the (morning|afternoon|evening)|at night", t):
+            return _next_occurrence_12h(hour, 0)
         return _next_occurrence(hour, 0)
 
     # Bare number with "in the morning/afternoon/evening/at night"
@@ -397,11 +416,14 @@ _SET_PATTERNS = [
 _QUERY_PATTERNS = [
     (TemplatePattern("[what|list|show] $rest [reminder|reminders]"), "query"),
     (TemplatePattern("what reminders do [I|we] have"), "query"),
+    (TemplatePattern("what reminders are set"), "query"),
     (TemplatePattern("[list|show] [my|our|the] reminders"), "query"),
 ]
 
 _CANCEL_PATTERNS = [
     (TemplatePattern("cancel all [reminder|reminders|my reminders|our reminders]"), "cancel_all"),
+    (TemplatePattern("cancel [my|the|our] $time reminder"), "cancel_time"),
+    (TemplatePattern("cancel $time reminder"), "cancel_time"),
     (TemplatePattern("cancel [my|the|our] [reminder|reminders|next reminder]"), "cancel"),
     (TemplatePattern("cancel [reminder|reminders]"), "cancel"),
 ]
@@ -435,6 +457,12 @@ def parse(text):
             return Parse(command="query_reminders", score=0.9)
         elif tag == "cancel_all":
             return Parse(command="cancel_all_reminders", score=0.9)
+        elif tag == "cancel_time":
+            parsed = parse_time(fields.get("time", ""))
+            if parsed:
+                return Parse(command="cancel_reminder_by_time", score=0.9,
+                             args={"time": parsed})
+            return Parse(command="cancel_reminder", score=0.9)
         elif tag == "cancel":
             return Parse(command="cancel_reminder", score=0.9)
 
@@ -491,6 +519,22 @@ def handle(p):
             return "You don't have any reminders to cancel."
         return f"All {count} reminder{'s' if count != 1 else ''} canceled."
 
+    elif p.command == "cancel_reminder_by_time":
+        target = p.args["time"]
+        with _lock:
+            if not _reminders:
+                return "You don't have any reminders to cancel."
+            # Find reminder matching the target hour:minute
+            for i, r in enumerate(_reminders):
+                if (r["time"].hour == target.hour and
+                        r["time"].minute == target.minute):
+                    removed = _reminders.pop(i)
+                    _save()
+                    time_str = removed["time"].strftime("%-I:%M %p")
+                    return f"Canceled your reminder to {removed['text']} at {time_str}."
+        time_str = target.strftime("%-I:%M %p")
+        return f"I don't see a reminder at {time_str}."
+
     elif p.command == "cancel_reminder":
         # For now, cancel the next upcoming one
         with _lock:
@@ -517,8 +561,11 @@ if __name__ == "__main__":
         "remind me tomorrow at 9am to take out the trash",
         "remind me Wednesday at 1pm to go to class",
         "what reminders do I have",
+        "what reminders are set",
+        "cancel 130 p.m. reminder",
         "cancel all reminders",
         "cancel my next reminder",
+        "remind me at one o'clock to go to dance class",
     ]
     for t in tests:
         result = parse(t)
