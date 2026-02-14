@@ -29,3 +29,6 @@ models/
 
 # Log files
 *.log
+
+# Runtime data (reminders, etc.)
+data/

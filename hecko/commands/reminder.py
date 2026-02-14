@@ -11,22 +11,59 @@ Handles:
     "cancel all reminders"
 """
 
+import json
+import os
 import re
 import threading
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from hecko.commands.parse import Parse
 from hecko.commands.template import TemplatePattern, match_any
 
-# Active reminders: [{time: datetime, text: str, original: str}, ...]
+# Active reminders: [{"time": datetime, "text": str}, ...]
 _reminders = []
 _lock = threading.Lock()
+
+# Persistence file: data/reminders.json relative to project root
+_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+_SAVE_PATH = _DATA_DIR / "reminders.json"
 
 # Callback for announcing reminders (set by main via set_announce_callback)
 _announce_cb = None
 
 _checker_thread = None
+
+_TIME_FMT = "%Y-%m-%d %H:%M"
+
+
+def _save():
+    """Write reminders to disk as JSON. Must be called with _lock held."""
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    data = [{"time": r["time"].strftime(_TIME_FMT), "text": r["text"]}
+            for r in _reminders]
+    tmp = _SAVE_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    tmp.rename(_SAVE_PATH)
+
+
+def _load():
+    """Load reminders from disk. Called once at startup."""
+    if not _SAVE_PATH.exists():
+        return
+    try:
+        data = json.loads(_SAVE_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return
+    now = datetime.now()
+    for entry in data:
+        try:
+            t = datetime.strptime(entry["time"], _TIME_FMT)
+        except (KeyError, ValueError):
+            continue
+        if t > now:
+            _reminders.append({"time": t, "text": entry["text"]})
 
 
 def set_announce_callback(cb):
@@ -41,6 +78,8 @@ def _start_checker():
     global _checker_thread
     if _checker_thread is not None and _checker_thread.is_alive():
         return
+    with _lock:
+        _load()
 
     def _check_loop():
         while True:
@@ -54,7 +93,9 @@ def _start_checker():
                         fired.append(r)
                     else:
                         remaining.append(r)
-                _reminders[:] = remaining
+                if fired:
+                    _reminders[:] = remaining
+                    _save()
             for r in fired:
                 msg = f"[[reminder.mp3]]This is a reminder: {r['text']}."
                 if _announce_cb:
@@ -415,6 +456,7 @@ def handle(p):
                     "time": reminder_time,
                     "text": reminder_text,
                 })
+                _save()
             time_str = reminder_time.strftime("%-I:%M %p")
             if reminder_time.date() == datetime.now().date():
                 return f"OK, I'll remind you to {reminder_text} at {time_str}."
@@ -444,6 +486,7 @@ def handle(p):
         with _lock:
             count = len(_reminders)
             _reminders.clear()
+            _save()
         if count == 0:
             return "You don't have any reminders to cancel."
         return f"All {count} reminder{'s' if count != 1 else ''} canceled."
@@ -455,6 +498,7 @@ def handle(p):
                 return "You don't have any reminders to cancel."
             _reminders.sort(key=lambda x: x["time"])
             removed = _reminders.pop(0)
+            _save()
         time_str = removed["time"].strftime("%-I:%M %p")
         return f"Canceled your reminder to {removed['text']} at {time_str}."
 

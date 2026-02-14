@@ -108,14 +108,45 @@ def synthesize(text, voice=None):
     return audio, sample_rate
 
 
+_output_device = None
 _output_rate = None
+
+# Preferred output devices, in priority order (substring match on device name)
+PREFERRED_OUTPUT_DEVICES = [
+    "eMeet Luna",
+]
+
+
+def _find_preferred_output():
+    """Find the best available output device based on priority.
+
+    Returns the device index, or None to use the system default.
+    """
+    devices = sd.query_devices()
+    for preferred in PREFERRED_OUTPUT_DEVICES:
+        for i, d in enumerate(devices):
+            if d["max_output_channels"] > 0 and preferred in d["name"]:
+                return i
+    return None
+
+
+def _get_output_device():
+    """Get the preferred output device index (cached). None = system default."""
+    global _output_device
+    if _output_device is None:
+        _output_device = _find_preferred_output() or False  # False = checked, use default
+    return _output_device if _output_device is not False else None
 
 
 def _get_output_rate():
-    """Get the default output device's sample rate (cached)."""
+    """Get the output device's sample rate (cached)."""
     global _output_rate
     if _output_rate is None:
-        dev = sd.query_devices(kind="output")
+        dev_idx = _get_output_device()
+        if dev_idx is not None:
+            dev = sd.query_devices(dev_idx)
+        else:
+            dev = sd.query_devices(kind="output")
         _output_rate = int(dev["default_samplerate"])
     return _output_rate
 
@@ -141,7 +172,8 @@ def _play_audio(audio, sample_rate):
     if sample_rate != target_rate:
         audio = _resample(audio, sample_rate, target_rate)
         sample_rate = target_rate
-    sd.play(audio, samplerate=sample_rate)
+    dev = _get_output_device()
+    sd.play(audio, samplerate=sample_rate, device=dev)
     sd.wait()
 
 

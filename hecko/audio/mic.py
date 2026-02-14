@@ -16,6 +16,7 @@ BLOCK_SIZE = 1600  # 100ms chunks at 16 kHz
 
 # Preferred input devices, in priority order (substring match on device name)
 PREFERRED_DEVICES = [
+    "eMeet Luna",
     "External Microphone",
     "MacBook Pro Microphone",
 ]
