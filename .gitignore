@@ -1,6 +1,5 @@
 # Credentials (keep out of version control)
-hecko/og_credentials.py
-hecko/spotify_credentials.py
+hecko/*_credentials.py
 
 # Auth token caches
 .spotipy_cache
@@ -27,3 +26,6 @@ models/
 
 # Claude Code
 .claude/
+
+# Log files
+*.log

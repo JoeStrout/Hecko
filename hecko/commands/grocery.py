@@ -18,6 +18,7 @@ import time
 from ourgroceries import OurGroceries
 from hecko.og_credentials import OG_USERNAME, OG_PASSWORD
 from hecko.commands.parse import Parse
+from hecko.commands.template import TemplatePattern, match_any
 
 # Cached client and list ID
 _og = None
@@ -172,42 +173,34 @@ def _strip_prefix(text):
     return t, False
 
 
-# --- Command classification ---
+# --- Command classification via templates ---
 
-_LIST_WORDS = r"(shopping|grocery|groceries)\s+list"
+_LIST = "[the|my] [shopping|grocery|groceries] list"
 
-# Patterns: (regex, action)
+# Full patterns (with list name): (TemplatePattern, action)
 _PATTERNS = [
-    # "add X to the list" / "put X on the list" ("and" = Whisper mishearing of "add")
-    (re.compile(rf"(?:add|and|put)\s+(.+?)\s+(?:to|on)\s+(?:the\s+|my\s+)?{_LIST_WORDS}",
-                re.IGNORECASE), "add"),
-    # "remove X from the list" / "take X off the list"
-    (re.compile(rf"(?:remove|take|delete)\s+(.+?)\s+(?:from|off)\s+(?:the\s+|my\s+)?{_LIST_WORDS}",
-                re.IGNORECASE), "remove"),
-    # "do I have X on the list" / "do we have X" / "is X on the list"
-    (re.compile(rf"(?:do\s+(?:I|we)\s+have|is|are)\s+(.+?)\s+(?:on|in)\s+(?:the\s+|my\s+)?{_LIST_WORDS}",
-                re.IGNORECASE), "check"),
-    # "how many items on the list"
-    (re.compile(rf"how\s+many\s+(?:items?|things?)\s+(?:are\s+)?(?:on|in)\s+(?:the\s+|my\s+)?{_LIST_WORDS}",
-                re.IGNORECASE), "count"),
-    # "what's on the list" / "what is on the list"
-    (re.compile(rf"what(?:'s|\s+is)\s+on\s+(?:the\s+|my\s+)?{_LIST_WORDS}",
-                re.IGNORECASE), "count"),
+    (TemplatePattern(f"[add|and|put] $item [to|on] {_LIST}"), "add"),
+    (TemplatePattern(f"Hello Grishory's Dad, $item"), "add"),
+    (TemplatePattern(f"[remove|take|delete] $item [from|off] {_LIST}"), "remove"),
+    (TemplatePattern(f"[do I have|do we have|is|are] $item [on|in] {_LIST}"), "check"),
+    (TemplatePattern(f"how many [items|things] [are |][on|in] {_LIST}"), "count"),
+    (TemplatePattern(f"[what's|what is] on {_LIST}"), "count"),
 ]
 
-
-# Bare patterns for use after "tell our groceries to" prefix (no list name needed)
+# Bare patterns for use after "tell our groceries to" prefix (no list name)
 _BARE_PATTERNS = [
-    # "add X"
-    (re.compile(r"(?:add|put)\s+(.+?)\.?$", re.IGNORECASE), "add"),
-    # "remove X" / "take off X"
-    (re.compile(r"(?:remove|take\s+off|delete)\s+(.+?)\.?$", re.IGNORECASE), "remove"),
-    # "do I have X" / "is X on there" / "check for X"
-    (re.compile(r"(?:do\s+(?:I|we)\s+have|is\s+there|check\s+for)\s+(.+?)\.?\??$",
-                re.IGNORECASE), "check"),
-    # "how many items"
-    (re.compile(r"how\s+many\s+(?:items?|things?)", re.IGNORECASE), "count"),
+    (TemplatePattern("[add|put|have] $item"), "add"),
+    (TemplatePattern("[remove|take off|delete] $item"), "remove"),
+    (TemplatePattern("[do I have|do we have|is there|check for] $item"), "check"),
+    (TemplatePattern("how many [items|things]"), "count"),
 ]
+
+# "and mark it important" suffix detector
+_IMPORTANT_RE = re.compile(
+    r"\s+and\s+(?:mark\s+(?:it\s+)?(?:as\s+)?important"
+    r"|mark\s+(?:it\s+)?starred"
+    r"|star\s+it|make\s+it\s+important)\.?$",
+    re.IGNORECASE)
 
 
 def _classify(text):
@@ -217,53 +210,34 @@ def _classify(text):
     """
     t, had_prefix = _strip_prefix(text)
 
-    # Try full patterns (with list name) first
-    for pattern, action in _PATTERNS:
-        m = pattern.search(t)
-        if m:
-            if action == "count":
-                return ("count", None, False)
+    # Strip trailing punctuation and "important" suffix before matching
+    important = False
+    clean = t.rstrip(".?!")
+    imp = _IMPORTANT_RE.search(clean)
+    if imp:
+        important = True
+        clean = clean[:imp.start()].strip()
 
-            item_name = m.group(1).strip()
-            important = False
-
-            if action == "add":
-                # Check for "and mark it important" / "and star it" etc.
-                # This may appear after the list name, so check the full text
-                imp_match = re.search(
-                    r"and\s+(?:mark\s+(?:it\s+)?(?:as\s+)?important"
-                    r"|mark\s+(?:it\s+)?starred"
-                    r"|star\s+it|make\s+it\s+important)",
-                    t, re.IGNORECASE)
-                if imp_match:
-                    important = True
-
-            return (action, item_name, important)
-
-    # If OG prefix was present, try bare patterns (no list name needed)
+    # Try full patterns (with list name) first, then bare if prefixed
+    pattern_lists = [_PATTERNS]
     if had_prefix:
-        for pattern, action in _BARE_PATTERNS:
-            m = pattern.search(t)
-            if m:
+        pattern_lists.append(_BARE_PATTERNS)
+
+    for patterns in pattern_lists:
+        for tmpl, action in patterns:
+            fields = tmpl.match(clean)
+            if fields is not None:
                 if action == "count":
                     return ("count", None, False)
 
-                item_name = m.group(1).strip()
-                important = False
+                item_name = fields["item"]
+                # Also strip "important" suffix from captured item name
+                item_cleaned = _IMPORTANT_RE.sub("", item_name).strip()
+                if item_cleaned != item_name:
+                    important = True
+                    item_name = item_cleaned
 
-                if action == "add":
-                    imp_match = re.search(
-                        r"and\s+(?:mark\s+(?:it\s+)?(?:as\s+)?important"
-                        r"|mark\s+(?:it\s+)?starred"
-                        r"|star\s+it|make\s+it\s+important)",
-                        t, re.IGNORECASE)
-                    if imp_match:
-                        item_name = re.sub(
-                            r"\s+and\s+(?:mark|star|make)\s.*$", "",
-                            item_name, flags=re.IGNORECASE).strip()
-                        important = True
-
-                return (action, item_name, important)
+                return (action, item_name, action == "add" and important)
 
     return None
 
@@ -284,11 +258,6 @@ def parse(text):
             args["important"] = important
         return Parse(command=command_map[action], score=0.9, args=args)
 
-    # Weak match: mentions shopping/grocery list at all
-    if re.search(_LIST_WORDS, t, re.IGNORECASE):
-        return None  # recognized topic but can't classify action
-    if re.search(r"\b(?:our|their|are|the)\s+groceries\b", text, re.IGNORECASE):
-        return None
     return None
 
 

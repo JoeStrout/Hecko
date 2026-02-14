@@ -8,30 +8,29 @@ Handles:
     "come again"
 """
 
-import re
-
 from hecko.commands.parse import Parse
+from hecko.commands.template import TemplatePattern
 
-_PATTERNS = re.compile(
-    r"\b(?:"
-    r"say\s+that\s+again"
-    r"|repeat\s+that"
-    r"|(?:can|could)\s+you\s+(?:repeat|say)\s+that"
-    r"|what\s+did\s+you\s+(?:say|just\s+say)"
-    r"|what\s+was\s+that"
-    r"|come\s+again"
-    r"|one\s+more\s+time"
-    r"|say\s+it\s+again"
-    r"|repeat\s+(?:yourself|the\s+last)"
-    r"|I\s+didn'?t\s+(?:catch|hear|get)\s+that"
-    r"|pardon"
-    r")\b",
-    re.IGNORECASE)
+_PATTERNS = [
+    TemplatePattern("say that again"),
+    TemplatePattern("repeat that"),
+    TemplatePattern("[can|could] you [repeat|say] that"),
+    TemplatePattern("what did you [say|just say]"),
+    TemplatePattern("what was that"),
+    TemplatePattern("come again"),
+    TemplatePattern("one more time"),
+    TemplatePattern("say it again"),
+    TemplatePattern("repeat [yourself|the last]"),
+    TemplatePattern("I [didn't|didn't|did not] [catch|hear|get] that"),
+    TemplatePattern("pardon"),
+    TemplatePattern("[could|can] you say that again"),
+]
 
 
 def parse(text):
-    if _PATTERNS.search(text):
-        return Parse(command="repeat", score=0.95)
+    for p in _PATTERNS:
+        if p.match(text) is not None:
+            return Parse(command="repeat", score=0.95)
     return None
 
 

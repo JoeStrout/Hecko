@@ -69,14 +69,18 @@ def _describe_weather_code(code):
     return _WMO_CODES.get(code, "unknown conditions")
 
 
+_FORECAST_WORDS = re.compile(r"\b(tomorrow|forecast|next few days|later this week)\b", re.IGNORECASE)
+_RAIN_WORDS = re.compile(r"\b(rain|snow|precipitation|umbrella|storm)\b", re.IGNORECASE)
+_CURRENT_WORDS = re.compile(r"\b(weather|temperature|temp|outside|how hot|how cold|how warm)\b", re.IGNORECASE)
+
+
 def _classify(text):
     """Classify: 'current', 'forecast', 'rain', or None."""
-    t = text.lower()
-    if re.search(r"\b(tomorrow|forecast|next few days|later this week)\b", t):
+    if _FORECAST_WORDS.search(text):
         return "forecast"
-    if re.search(r"\b(rain|snow|precipitation|umbrella|storm)\b", t):
+    if _RAIN_WORDS.search(text):
         return "rain"
-    if re.search(r"\b(weather|temperature|temp|outside|how hot|how cold|how warm)\b", t):
+    if _CURRENT_WORDS.search(text):
         return "current"
     return None
 

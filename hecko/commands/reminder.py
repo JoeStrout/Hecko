@@ -4,6 +4,9 @@ Handles:
     "remind me to feed the cat at 3pm"
     "remind me at 12:30 to call my mom"
     "remind me to take my power adapter at 6 o'clock in the morning"
+    "remind me on Tuesday at 3pm to go to class"
+    "remind me to call mom at noon on Friday"
+    "remind me tomorrow at 9am to take out the trash"
     "what reminders do I have"
     "cancel all reminders"
 """
@@ -14,6 +17,7 @@ import time
 from datetime import datetime, timedelta
 
 from hecko.commands.parse import Parse
+from hecko.commands.template import TemplatePattern, match_any
 
 # Active reminders: [{time: datetime, text: str, original: str}, ...]
 _reminders = []
@@ -84,38 +88,40 @@ def parse_time(text):
         return _next_occurrence(0, 0)
 
     # "H:MM am/pm", "H.MM am/pm", "H:MM", "H.MM" (STT sometimes uses period)
-    m = re.search(r"\b(\d{1,2})[:.](\d{2})\s*(a\.?m\.?|p\.?m\.?)?\b", t)
+    m = re.search(r"\b(\d{1,2})[:.](\d{2})\s*(a\.?\s*m\.?|p\.?\s*m\.?)?\b", t)
     if m:
         hour, minute = int(m.group(1)), int(m.group(2))
-        ampm = (m.group(3) or "").replace(".", "")
+        ampm = (m.group(3) or "").replace(".", "").replace(" ", "")
         hour = _apply_ampm(hour, ampm, t)
+        if not ampm and 1 <= hour <= 11:
+            return _next_occurrence_12h(hour, minute)
         return _next_occurrence(hour, minute)
 
     # "HMM am/pm" — no separator, e.g. "845 p.m." from STT
-    m = re.search(r"\b(\d{3,4})\s*(a\.?m\.?|p\.?m\.?)\b", t)
+    m = re.search(r"\b(\d{3,4})\s*(a\.?\s*m\.?|p\.?\s*m\.?)\b", t)
     if m:
         digits = m.group(1)
         if len(digits) == 3:
             hour, minute = int(digits[0]), int(digits[1:])
         else:
             hour, minute = int(digits[:2]), int(digits[2:])
-        ampm = m.group(2).replace(".", "")
+        ampm = m.group(2).replace(".", "").replace(" ", "")
         hour = _apply_ampm(hour, ampm, t)
         return _next_occurrence(hour, minute)
 
     # "H MM am/pm" — space-separated, e.g. "8 50 p.m." from STT
-    m = re.search(r"\b(\d{1,2})\s+(\d{2})\s*(a\.?m\.?|p\.?m\.?)\b", t)
+    m = re.search(r"\b(\d{1,2})\s+(\d{2})\s*(a\.?\s*m\.?|p\.?\s*m\.?)\b", t)
     if m:
         hour, minute = int(m.group(1)), int(m.group(2))
-        ampm = m.group(3).replace(".", "")
+        ampm = m.group(3).replace(".", "").replace(" ", "")
         hour = _apply_ampm(hour, ampm, t)
         return _next_occurrence(hour, minute)
 
-    # "H am/pm" or "H pm" (no minutes)
-    m = re.search(r"\b(\d{1,2})\s*(a\.?m\.?|p\.?m\.?)\b", t)
+    # "H am/pm" or "H pm" or "H p m" (no minutes; allow space in a/p m)
+    m = re.search(r"\b(\d{1,2})\s*(a\.?\s*m\.?|p\.?\s*m\.?)\b", t)
     if m:
         hour = int(m.group(1))
-        ampm = m.group(2).replace(".", "")
+        ampm = m.group(2).replace(".", "").replace(" ", "")
         hour = _apply_ampm(hour, ampm, t)
         return _next_occurrence(hour, 0)
 
@@ -202,6 +208,56 @@ def _next_occurrence_12h(hour, minute):
     return min(am_target, pm_target)
 
 
+# --- Day parsing ---
+
+_DAY_NAMES = {
+    "monday": 0, "mon": 0,
+    "tuesday": 1, "tue": 1, "tues": 1,
+    "wednesday": 2, "wed": 2,
+    "thursday": 3, "thu": 3, "thur": 3, "thurs": 3,
+    "friday": 4, "fri": 4,
+    "saturday": 5, "sat": 5,
+    "sunday": 6, "sun": 6,
+}
+
+
+def _parse_day(text):
+    """Parse a day reference to a target date.
+
+    Handles day names (Monday, Tue, etc.), "tomorrow", and "today".
+    Returns a date or None.
+    """
+    t = text.lower().strip()
+    if t == "tomorrow":
+        return (datetime.now() + timedelta(days=1)).date()
+    if t == "today":
+        return datetime.now().date()
+    # Strip optional "next" prefix
+    t = re.sub(r"^next\s+", "", t)
+    weekday = _DAY_NAMES.get(t)
+    if weekday is not None:
+        today = datetime.now().date()
+        days_ahead = (weekday - today.weekday()) % 7
+        # Same day: return today (time resolution will push to next week if past)
+        return today + timedelta(days=days_ahead)
+    return None
+
+
+def _resolve_time_on_day(time_text, target_date):
+    """Parse a time expression and place it on target_date.
+
+    Uses parse_time to get the hour/minute, then combines with the target date.
+    If the result is in the past, advances by 7 days (for same-day references).
+    """
+    parsed = parse_time(time_text)
+    if parsed is None:
+        return None
+    target = datetime.combine(target_date, parsed.time())
+    if target <= datetime.now():
+        target += timedelta(days=7)
+    return target
+
+
 # --- Pronoun flipping ---
 
 _PRONOUN_MAP = [
@@ -229,40 +285,37 @@ def _flip_pronouns(text):
 
 # --- Reminder text extraction ---
 
-def _extract_reminder(text):
-    """Extract the reminder text and time from the input.
+def _extract_reminder(fields):
+    """Extract reminder text and time from matched template fields.
+
+    Fields may contain:
+        - 'reminder_text' and 'time' (and optionally 'day')
+        - 'rest' for the fallback pattern where time is embedded in the text
 
     Returns:
         (reminder_text, parsed_time) or (None, None)
     """
-    t = text
+    # Resolve optional day field
+    target_day = None
+    if "day" in fields:
+        target_day = _parse_day(fields["day"])
+        if target_day is None:
+            return None, None  # $day wasn't a valid day name — fall through
 
-    # Try "remind me to X at TIME" pattern
-    m = re.search(r"remind me\s+to\s+(.+?)\s+at\s+(.+)", t, re.IGNORECASE)
-    if m:
-        reminder_text = m.group(1).strip().rstrip(".")
-        time_part = m.group(2).strip().rstrip(".")
-        parsed = parse_time(time_part)
+    if "reminder_text" in fields and "time" in fields:
+        if target_day:
+            parsed = _resolve_time_on_day(fields["time"], target_day)
+        else:
+            parsed = parse_time(fields["time"])
         if parsed:
-            return _flip_pronouns(reminder_text), parsed
+            return _flip_pronouns(fields["reminder_text"]), parsed
 
-    # Try "remind me at TIME to X" pattern
-    m = re.search(r"remind me\s+at\s+(.+?)\s+to\s+(.+)", t, re.IGNORECASE)
-    if m:
-        time_part = m.group(1).strip()
-        reminder_text = m.group(2).strip().rstrip(".")
-        parsed = parse_time(time_part)
-        if parsed:
-            return _flip_pronouns(reminder_text), parsed
-
-    # Try "remind me to X" with time embedded anywhere
-    m = re.search(r"remind me\s+to\s+(.+)", t, re.IGNORECASE)
-    if m:
-        full = m.group(1).strip().rstrip(".")
+    # Fallback: time embedded in reminder text (e.g. "remind me to take pills at 6pm")
+    if "rest" in fields:
+        full = fields["rest"]
         parsed = parse_time(full)
         if parsed:
-            # Remove the time portion from the reminder text
-            # Strip trailing time patterns
+            # Strip trailing time patterns from the reminder text
             cleaned = re.sub(
                 r"\s+at\s+\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.|o['\u2019]?\s*clock)?"
                 r"(\s+in the (morning|afternoon|evening)|at night)?\.?$",
@@ -274,39 +327,78 @@ def _extract_reminder(text):
     return None, None
 
 
-# --- Command scoring and handling ---
+# --- Command classification via templates ---
 
-def _classify(text):
-    t = text.lower()
-    if re.search(r"\bremind\s+me\b", t):
-        return "set"
-    if re.search(r"\b(what|list|show).*\breminder", t):
-        return "query"
-    if re.search(r"\bcancel\b.*\breminder", t):
-        if re.search(r"\ball\b", t):
-            return "cancel_all"
-        return "cancel"
-    return None
+# Day-aware set patterns (tried first; fall through if $day isn't a valid day name)
+# Non-greedy so $day and $time stay short; $reminder_text absorbs the remainder.
+_DAY_SET_PATTERNS = [
+    # "remind me on Monday at 3pm to go to class"
+    (TemplatePattern("remind [me|us] on $day at $time to $reminder_text"), "set_day"),
+    # "remind me Monday at 3pm to go to class" (no "on")
+    (TemplatePattern("remind [me|us] $day at $time to $reminder_text"), "set_day"),
+    # "remind me to call mom at 3pm on Monday"
+    (TemplatePattern("remind [me|us] to $reminder_text at $time on $day", greedy=True), "set_day"),
+    # "remind me to call mom on Monday at 3pm"
+    (TemplatePattern("remind [me|us] to $reminder_text on $day at $time", greedy=True), "set_day"),
+    # "remind me on Monday to call mom at 3pm"
+    (TemplatePattern("remind [me|us] on $day to $reminder_text at $time", greedy=True), "set_day"),
+]
+
+_SET_PATTERNS = [
+    # "remind me to X at TIME" — greedy so $reminder_text grabs everything before "at TIME"
+    (TemplatePattern("remind [me|us] to $reminder_text at $time", greedy=True), "set"),
+    # "remind me at TIME to X"
+    (TemplatePattern("remind [me|us] at $time to $reminder_text"), "set"),
+    # "remind me to X" (time embedded in the text, handled by fallback extraction)
+    (TemplatePattern("remind [me|us] to $rest"), "set_fallback"),
+]
+
+_QUERY_PATTERNS = [
+    (TemplatePattern("[what|list|show] $rest [reminder|reminders]"), "query"),
+    (TemplatePattern("what reminders do [I|we] have"), "query"),
+    (TemplatePattern("[list|show] [my|our|the] reminders"), "query"),
+]
+
+_CANCEL_PATTERNS = [
+    (TemplatePattern("cancel all [reminder|reminders|my reminders|our reminders]"), "cancel_all"),
+    (TemplatePattern("cancel [my|the|our] [reminder|reminders|next reminder]"), "cancel"),
+    (TemplatePattern("cancel [reminder|reminders]"), "cancel"),
+]
+
+_NON_DAY_PATTERNS = _SET_PATTERNS + _QUERY_PATTERNS + _CANCEL_PATTERNS
 
 
 def parse(text):
-    cmd = _classify(text)
-    if cmd is not None:
-        if cmd == "set":
-            reminder_text, reminder_time = _extract_reminder(text)
+    # Try day-aware patterns first (fall through if $day isn't a valid day name)
+    result = match_any(_DAY_SET_PATTERNS, text)
+    if result is not None:
+        tag, fields = result
+        reminder_text, reminder_time = _extract_reminder(fields)
+        if reminder_text and reminder_time:
+            return Parse(command="set_reminder", score=0.9,
+                         args={"text": reminder_text, "time": reminder_time})
+        # Day pattern matched structurally but $day was invalid — fall through
+
+    # Try non-day patterns
+    result = match_any(_NON_DAY_PATTERNS, text)
+    if result is not None:
+        tag, fields = result
+        if tag in ("set", "set_fallback"):
+            reminder_text, reminder_time = _extract_reminder(fields)
             if reminder_text and reminder_time:
                 return Parse(command="set_reminder", score=0.9,
                              args={"text": reminder_text, "time": reminder_time})
-            # Recognized as set but couldn't parse
+            # Recognized as set but couldn't parse time
             return Parse(command="set_reminder", score=0.9, args={})
-        elif cmd == "query":
+        elif tag == "query":
             return Parse(command="query_reminders", score=0.9)
-        elif cmd == "cancel_all":
+        elif tag == "cancel_all":
             return Parse(command="cancel_all_reminders", score=0.9)
-        elif cmd == "cancel":
+        elif tag == "cancel":
             return Parse(command="cancel_reminder", score=0.9)
 
-    if re.search(r"\bremind", text.lower()):
+    # Weak match: mentions "remind" at all
+    if re.search(r"\bremind", text, re.IGNORECASE):
         return Parse(command="set_reminder", score=0.5, args={})
     return None
 
@@ -324,7 +416,10 @@ def handle(p):
                     "text": reminder_text,
                 })
             time_str = reminder_time.strftime("%-I:%M %p")
-            return f"OK, I'll remind you to {reminder_text} at {time_str}."
+            if reminder_time.date() == datetime.now().date():
+                return f"OK, I'll remind you to {reminder_text} at {time_str}."
+            day_str = reminder_time.strftime("%A")
+            return f"OK, I'll remind you to {reminder_text} on {day_str} at {time_str}."
         return "Sorry, I didn't understand the time for that reminder."
 
     elif p.command == "query_reminders":
@@ -332,9 +427,14 @@ def handle(p):
             if not _reminders:
                 return "You don't have any reminders set."
             parts = []
+            today = datetime.now().date()
             for r in sorted(_reminders, key=lambda x: x["time"]):
                 time_str = r["time"].strftime("%-I:%M %p")
-                parts.append(f"{r['text']} at {time_str}")
+                if r["time"].date() == today:
+                    parts.append(f"{r['text']} at {time_str}")
+                else:
+                    day_str = r["time"].strftime("%A")
+                    parts.append(f"{r['text']} on {day_str} at {time_str}")
         if len(parts) == 1:
             return f"You have one reminder: {parts[0]}."
         listing = ", and ".join([", ".join(parts[:-1]), parts[-1]])
@@ -368,6 +468,10 @@ if __name__ == "__main__":
         "remind me to feed the cat at 3pm",
         "remind me at 12:30 to call my mom",
         "remind me to take my pills at 6 o'clock in the morning",
+        "remind me on Tuesday at 3pm to go to class",
+        "remind me to call mom at noon on Friday",
+        "remind me tomorrow at 9am to take out the trash",
+        "remind me Wednesday at 1pm to go to class",
         "what reminders do I have",
         "cancel all reminders",
         "cancel my next reminder",

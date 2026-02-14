@@ -1,0 +1,605 @@
+# Hecko command parse test cases
+#
+# Format:
+#   > user input text
+#   module: expected_module (or "none" for no match)
+#   command: expected_command
+#   arg_name: expected_value
+#   arg_name.attr: expected_value   (dotted attribute access)
+#   score: expected_score            (check Parse.score)
+#   arg_name: nonempty               (list has >= 1 element)
+#
+# Values are auto-typed: true/false -> bool, none -> None,
+# integers, floats, else string.
+#
+# Every arg in the parse result must be mentioned in the test case.
+# If the parse has an arg you didn't list, the test fails.
+#
+# Lines starting with # are comments. Blank lines are ignored.
+
+
+# -- Time --
+
+> what time is it
+module: time_cmd
+command: get_time
+
+> what day is it
+module: time_cmd
+command: get_day
+
+> what is the date
+module: time_cmd
+command: get_date
+
+> what's today's date
+module: time_cmd
+command: get_date
+
+> tell me the time
+module: time_cmd
+command: get_time
+
+
+# -- Weather --
+
+> what's the weather
+module: weather
+command: current_weather
+
+> what's the temperature
+module: weather
+command: current_weather
+
+> what's the forecast
+module: weather
+command: forecast
+
+> is it going to rain
+module: weather
+command: rain_check
+
+> what's the weather tomorrow
+module: weather
+command: forecast
+
+
+# -- Greeting --
+
+> hello
+module: greeting
+command: greet
+score: 1.0
+
+> hi
+module: greeting
+command: greet
+
+> good morning
+module: greeting
+command: greet
+
+> thank you
+module: greeting
+command: respond_thanks
+
+> thanks
+module: greeting
+command: respond_thanks
+
+> goodbye
+module: greeting
+command: respond_goodbye
+
+> see you later
+module: greeting
+command: respond_goodbye
+
+> I'm done
+module: greeting
+command: respond_goodbye
+
+> that's all
+module: greeting
+command: respond_goodbye
+
+
+# -- Quit --
+
+> quit demo
+module: quit_demo
+command: quit
+score: 1.0
+
+> exit demo
+module: quit_demo
+command: quit
+
+
+# -- Repeat --
+
+> say that again
+module: repeat
+command: repeat
+
+> repeat that
+module: repeat
+command: repeat
+
+> what did you say
+module: repeat
+command: repeat
+
+> pardon
+module: repeat
+command: repeat
+
+> I didn't catch that
+module: repeat
+command: repeat
+
+
+# -- Timer --
+
+> set a timer for 5 minutes
+module: timer
+command: set_timer
+seconds: 300
+label: 5-minute
+
+> set a 30 second timer
+module: timer
+command: set_timer
+seconds: 30
+label: 30-second
+
+> set a timer for one hour
+module: timer
+command: set_timer
+seconds: 3600
+label: 1-hour
+
+> set a timer for a minute and a half
+module: timer
+command: set_timer
+seconds: 90
+label: 90-second
+
+> how much time is left
+module: timer
+command: query_timers
+
+> cancel the 5 minute timer
+module: timer
+command: cancel_timer
+label: 5-minute
+
+> cancel all timers
+module: timer
+command: cancel_all_timers
+
+
+# -- Reminder --
+
+> remind me to feed the cat at 3pm
+module: reminder
+command: set_reminder
+text: feed the cat
+time.hour: 15
+time.minute: 0
+
+> remind me at 12:30 to call my mom
+module: reminder
+command: set_reminder
+text: call your mom
+time.hour: 12
+time.minute: 30
+
+> what reminders do I have
+module: reminder
+command: query_reminders
+
+> cancel all reminders
+module: reminder
+command: cancel_all_reminders
+
+
+# -- Grocery --
+
+> add ketchup to the shopping list
+module: grocery
+command: add_item
+item_name: ketchup
+important: false
+
+> put diet 7 up on the grocery list
+module: grocery
+command: add_item
+item_name: diet 7 up
+important: false
+
+> remove soda from the shopping list
+module: grocery
+command: remove_item
+item_name: soda
+
+> take cream of tartar off the grocery list
+module: grocery
+command: remove_item
+item_name: cream of tartar
+
+> do I have eggs on the shopping list?
+module: grocery
+command: check_item
+item_name: eggs
+
+> how many items are on my grocery list?
+module: grocery
+command: count_items
+
+> add butter to the shopping list and mark it important
+module: grocery
+command: add_item
+item_name: butter
+important: true
+
+> tell Our Groceries to add cranberry juice
+module: grocery
+command: add_item
+item_name: cranberry juice
+important: false
+
+> ask Our Groceries to remove milk
+module: grocery
+command: remove_item
+item_name: milk
+
+> tell Our Groceries to add eggs and mark it important
+module: grocery
+command: add_item
+item_name: eggs
+important: true
+
+> what's on the shopping list
+module: grocery
+command: count_items
+
+> Tell our groceries to have asparagus.
+module: grocery
+command: add_item
+item_name: asparagus
+important: false
+
+> Hello Grishory's Dad, Asparagus.
+module: grocery
+command: add_item
+item_name: Asparagus
+important: false
+
+
+# -- Music --
+
+> play some music
+module: music
+command: play_music
+
+> let's have some music
+module: music
+command: play_music
+
+> play my Birthday Favorites playlist
+module: music
+command: play_playlist
+name: Birthday Favorites
+
+> play Pour Some Sugar on Me
+module: music
+command: play_track
+title: Pour Some Sugar on Me
+artist: none
+
+> play Ordinary by Alex Warren
+module: music
+command: play_track
+title: Ordinary
+artist: Alex Warren
+
+> pause the music
+module: music
+command: pause
+
+> resume music
+module: music
+command: resume
+
+> stop the music
+module: music
+command: stop
+
+> skip song
+module: music
+command: skip
+
+> next song
+module: music
+command: skip
+
+> what's playing
+module: music
+command: now_playing
+
+> music, please
+module: music
+command: play_music
+
+
+# -- Math --
+
+> what's 347 times 23
+module: math_cmd
+command: binary_op
+a: 347.0
+b: 23.0
+op: *
+op_word: times
+
+> what's 5 plus 3
+module: math_cmd
+command: binary_op
+a: 5.0
+b: 3.0
+op: +
+op_word: plus
+
+> what's 100 minus 37
+module: math_cmd
+command: binary_op
+a: 100.0
+b: 37.0
+op: -
+op_word: minus
+
+> what is 144 divided by 12
+module: math_cmd
+command: binary_op
+a: 144.0
+b: 12.0
+op: /
+op_word: divided by
+
+> what is 15% of 85
+module: math_cmd
+command: percent
+pct: 15.0
+base: 85.0
+
+> what's 15 percent of 200
+module: math_cmd
+command: percent
+pct: 15.0
+base: 200.0
+
+> what's the square root of 144
+module: math_cmd
+command: sqrt
+n: 144.0
+
+> what is 7 squared
+module: math_cmd
+command: power
+n: 7.0
+exp: 2
+
+> what's 3 cubed
+module: math_cmd
+command: power
+n: 3.0
+exp: 3
+
+> what is 2 to the power of 8
+module: math_cmd
+command: binary_op
+a: 2.0
+b: 8.0
+op: **
+op_word: to the power of
+
+
+# -- Unit Conversion --
+
+> how many tablespoons in a quarter cup
+module: math_cmd
+command: convert_units
+value: 0.25
+from_unit: cup
+to_unit: tablespoon
+
+> how many feet in a mile
+module: math_cmd
+command: convert_units
+value: 1.0
+from_unit: mile
+to_unit: foot
+
+> convert 72 fahrenheit to celsius
+module: math_cmd
+command: convert_units
+value: 72.0
+from_unit: degF
+to_unit: degC
+
+> what's 5 feet in centimeters
+module: math_cmd
+command: convert_units
+value: 5.0
+from_unit: foot
+to_unit: centimeter
+
+> how many cups in a half gallon
+module: math_cmd
+command: convert_units
+value: 0.5
+from_unit: gallon
+to_unit: cup
+
+> how many tablespoons in three quarters cup
+module: math_cmd
+command: convert_units
+value: 0.75
+from_unit: cup
+to_unit: tablespoon
+
+
+# -- Sports --
+
+> when's the next U of A basketball game
+module: sports
+command: next_game
+teams: nonempty
+
+> when's the next wildcats game
+module: sports
+command: next_game
+teams: nonempty
+
+> is there a basketball game this week
+module: sports
+command: this_week
+teams: nonempty
+
+> any games next week
+module: sports
+command: next_week
+teams: nonempty
+
+> who won the last Arizona game
+module: sports
+command: last_game
+teams: nonempty
+
+> what was the score of the last basketball game
+module: sports
+command: last_game
+teams: nonempty
+
+> how did the cats do
+module: sports
+command: last_game
+teams: nonempty
+
+> when's the next game
+module: sports
+command: next_game
+teams: nonempty
+
+
+# -- Sleep/Wake --
+
+> go to sleep
+module: sleep
+command: sleep
+
+> stop listening
+module: sleep
+command: sleep
+
+> enter privacy mode
+module: sleep
+command: sleep
+
+> mute
+module: sleep
+command: sleep
+
+
+# -- Ask Claude --
+
+> ask Claude what is the capital of France
+module: ask_claude
+command: ask
+message: what is the capital of France
+
+> hey Claude how far is the moon
+module: ask_claude
+command: ask
+message: how far is the moon
+
+> Claude what is the speed of light
+module: ask_claude
+command: ask
+message: what is the speed of light
+
+> Ask Claude, what is the speed of light?
+module: ask_claude
+command: ask
+message: what is the speed of light
+
+
+# -- Stock Prices --
+
+> how is Apple doing
+module: stock_prices
+command: stock_price
+stock: Apple
+
+> what's the price of Tesla
+module: stock_prices
+command: stock_price
+stock: Tesla
+
+> how's the S&P 500 doing
+module: stock_prices
+command: stock_price
+stock: S&P 500
+
+> what's the current price of HPE
+module: stock_prices
+command: stock_price
+stock: HPE
+
+> how is Nvidia doing today
+module: stock_prices
+command: stock_price
+stock: Nvidia
+
+> check the price of Microsoft
+module: stock_prices
+command: stock_price
+stock: Microsoft
+
+> compare Apple to a month ago
+module: stock_prices
+command: compare
+stock: Apple
+period: 1mo
+label: a month
+
+> compare Tesla to three weeks ago
+module: stock_prices
+command: compare
+stock: Tesla
+period: 21d
+label: three weeks
+
+> how's the Dow compared to a year ago
+module: stock_prices
+command: compare
+stock: Dow
+period: 1y
+label: a year
+
+> what was gold 6 months ago
+module: stock_prices
+command: what_was
+stock: gold
+period: 6mo
+label: 6 months
+
+
+# -- No match --
+
+> flurble garble zoop
+module: none
+
+> the cat sat on the mat
+module: none

@@ -12,8 +12,8 @@ from hecko.wake.detector import WakeWordDetector
 from hecko.vad.silero import load_vad_model, SpeechRecorder
 from hecko.stt.whisper import load_model as load_whisper, transcribe
 from hecko.tts.piper import speak, play_sound
-from hecko.commands import router
-from hecko.commands import greeting, quit_demo, timer, weather, time_cmd, reminder, grocery, music, math_cmd, sports, repeat
+from hecko.commands import router, ALL_COMMANDS
+from hecko.commands import timer, reminder, music, sleep, quit_demo
 
 # How long to wait for speech after wake word before playing the prompt
 _PRE_SPEECH_TIMEOUT = 0.5  # seconds
@@ -48,17 +48,8 @@ def main():
     log(f"  TTS ready ({time.time() - t1:.1f}s)")
 
     # Register commands
-    router.register(greeting)
-    router.register(quit_demo)
-    router.register(timer)
-    router.register(weather)
-    router.register(time_cmd)
-    router.register(reminder)
-    router.register(grocery)
-    router.register(music)
-    router.register(math_cmd)
-    router.register(sports)
-    router.register(repeat)
+    for cmd in ALL_COMMANDS:
+        router.register(cmd)
 
     # Wire up timer/reminder announcements to TTS
     def announce(text):
@@ -67,6 +58,13 @@ def main():
 
     timer.set_announce_callback(announce)
     reminder.set_announce_callback(announce)
+
+    # Start Telegram bot (if token is configured)
+    try:
+        from hecko.telegram_bot import start_telegram
+        start_telegram()
+    except Exception as e:
+        log(f"Telegram bot failed to start: {e}")
 
     log(f"All models loaded in {time.time() - t0:.1f}s")
     log(f"Wake word: {wake.model_name}")
@@ -114,14 +112,15 @@ def main():
                 if not prompted and not recorder.speech_started:
                     elapsed = time.time() - last_wake
                     if elapsed >= _PRE_SPEECH_TIMEOUT:
-                        log("  No speech yet, playing prompt...")
                         prompted = True
                         # Create fresh recorder BEFORE playing sound, so audio
                         # captured during playback goes to the new recorder
                         recorder = SpeechRecorder(
                             vad_model, max_seconds=_PROMPTED_LISTEN_SECONDS)
                         record_start = time.time()
-                        play_sound("listening.mp3")
+                        if not sleep.sleeping:
+                            log("  No speech yet, playing prompt...")
+                            play_sound("listening.mp3")
 
                 if recorder.done:
                     audio = recorder.get_result()
@@ -131,7 +130,8 @@ def main():
                     prompted = False
 
                     if audio is not None and len(audio) > 1600:  # at least 100ms
-                        play_sound("processing.mp3")
+                        if not sleep.sleeping:
+                            play_sound("processing.mp3")
                         log("  Transcribing...")
                         t0 = time.time()
                         text = transcribe(audio, whisper)
@@ -140,12 +140,16 @@ def main():
 
                         if text:
                             response, scores = router.dispatch(text)
-                            if scores:
-                                score_str = ", ".join(
-                                    f"{name}={s:.2f}" for name, s in scores)
-                                log(f"  Scores: {score_str}")
-                            log(f"  Response: \"{response}\"")
-                            speak(response)
+                            if response is None:
+                                # Sleeping — silently ignore
+                                pass
+                            else:
+                                if scores:
+                                    score_str = ", ".join(
+                                        f"{name}={s:.2f}" for name, s in scores)
+                                    log(f"  Scores: {score_str}")
+                                log(f"  Response: \"{response}\"")
+                                speak(response)
 
                             if quit_demo.quit_requested:
                                 log("\nQuit requested. Goodbye!")
