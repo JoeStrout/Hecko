@@ -111,6 +111,7 @@ Hecko/
 - **Sound effects**: Use `[[filename.mp3]]` markers in response text. Files live in `sounds/`.
 - **Pronunciation**: Add entries to `_PRONUNCIATION_FIXES` in `tts/piper.py` for mispronounced words.
 - **STT quirks**: Whisper outputs varied time formats (e.g., "845 p.m.", "8.50", "8 50 p.m."). Time parsers must handle these.
+- **Template matching**: Rely on template patterns as defined in commands/template.py as much as possible, resorting to regex only when absolutely necessary.
 
 ## Key Decisions Made
 
@@ -123,5 +124,4 @@ Hecko/
 ## Next Up
 
 - **Wake word bypass**: After certain responses (e.g., greeting's "How can I help you?"), skip the wake word and listen directly for a follow-up command. Design the mechanism for commands to signal this.
-- **Grocery list**: Our Groceries API integration
 - **Custom wake word**: Train an openWakeWord model for "Hey Hecko"

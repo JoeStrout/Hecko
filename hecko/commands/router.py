@@ -78,6 +78,7 @@ def dispatch(text, source="[voice]"):
     scores = [(p.module.__name__.split(".")[-1], p.score) for p in parses]
 
     best = parses[0]
+    best.source = source
     _log_request(text, best, source)
     response = best.module.handle(best)
 

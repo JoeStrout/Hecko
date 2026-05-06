@@ -56,10 +56,16 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(cleaned)
 
 
+async def _error_handler(update, context: ContextTypes.DEFAULT_TYPE):
+    """Log Telegram errors as a single line instead of a full traceback."""
+    _log(f"  [Telegram] Network error (will retry): {context.error}")
+
+
 async def _run_bot_async(token):
     """Run the Telegram bot polling loop (async)."""
     app = ApplicationBuilder().token(token).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
+    app.add_error_handler(_error_handler)
 
     await app.initialize()
     await app.updater.start_polling(drop_pending_updates=True)

@@ -13,3 +13,4 @@ class Parse:
     score: float          # 0.0–1.0
     args: dict = field(default_factory=dict)
     module: object = None  # reference to the module — set by router
+    source: str = "[voice]"  # e.g. "[voice]", "[Telegram:Joe]" — set by router

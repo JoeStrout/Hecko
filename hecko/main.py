@@ -13,7 +13,7 @@ from hecko.vad.silero import load_vad_model, SpeechRecorder
 from hecko.stt.whisper import load_model as load_whisper, transcribe
 from hecko.tts.piper import speak, play_sound
 from hecko.commands import router, ALL_COMMANDS
-from hecko.commands import timer, reminder, music, sleep, quit_demo
+from hecko.commands import timer, reminder, music, sleep, quit_demo, location
 
 # How long to wait for speech after wake word before playing the prompt
 _PRE_SPEECH_TIMEOUT = 0.5  # seconds
@@ -65,6 +65,9 @@ def main():
         start_telegram()
     except Exception as e:
         log(f"Telegram bot failed to start: {e}")
+
+    # Fetch home location in background (for relative distance in locate commands)
+    location.start_home_location_fetch()
 
     log(f"All models loaded in {time.time() - t0:.1f}s")
     log(f"Wake word: {wake.model_name}")

@@ -157,7 +157,7 @@ async def _count_items():
 # --- Prefix stripping ---
 
 _OG_PREFIX_RE = re.compile(
-    r"^(?:tell|fill|ask)\s+(?:our|their|are|the)\s+groceries\s+(?:to\s+)?",
+    r"^(?:tell|fill|ask)\s+(?:our|their|are|the)\s+(?:groceries|archeries)\s+(?:to\s+)?",
     re.IGNORECASE)
 
 
@@ -179,7 +179,7 @@ _LIST = "[the|my] [shopping|grocery|groceries] list"
 
 # Full patterns (with list name): (TemplatePattern, action)
 _PATTERNS = [
-    (TemplatePattern(f"[add|and|put] $item [to|on] {_LIST}"), "add"),
+    (TemplatePattern(f"[add|and|put|but] $item [to|on] {_LIST}"), "add"),
     (TemplatePattern(f"Hello Grishory's Dad, $item"), "add"),
     (TemplatePattern(f"[remove|take|delete] $item [from|off] {_LIST}"), "remove"),
     (TemplatePattern(f"[do I have|do we have|is|are] $item [on|in] {_LIST}"), "check"),
@@ -189,7 +189,7 @@ _PATTERNS = [
 
 # Bare patterns for use after "tell our groceries to" prefix (no list name)
 _BARE_PATTERNS = [
-    (TemplatePattern("[add|put|have] $item"), "add"),
+    (TemplatePattern("[add|put|but|have] $item"), "add"),
     (TemplatePattern("[remove|take off|delete] $item"), "remove"),
     (TemplatePattern("[do I have|do we have|is there|check for] $item"), "check"),
     (TemplatePattern("how many [items|things]"), "count"),

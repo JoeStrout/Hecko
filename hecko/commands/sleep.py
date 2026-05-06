@@ -19,18 +19,13 @@ _SLEEP_PATTERNS = [
     TemplatePattern("go to sleep"),
     TemplatePattern("stop listening"),
     TemplatePattern("[pause|suspend] [operation|operations]"),
-    TemplatePattern("enter privacy mode"),
-    TemplatePattern("privacy mode"),
-    TemplatePattern("go [to|into] sleep [mode|]"),
-    TemplatePattern("sleep mode"),
-    TemplatePattern("be quiet"),
-    TemplatePattern("shut up"),
-    TemplatePattern("mute"),
+    TemplatePattern("[enter|start|engage] [sleep|privacy] mode"),
+    TemplatePattern("[sleep|privacy] mode"),
+    TemplatePattern("go [to|into] [sleep|privacy] [mode|]"),
 ]
 
 _WAKE_PATTERNS = [
-    TemplatePattern("wake up"),
-    TemplatePattern("I'm back"),
+    TemplatePattern("[wake|pick] up"),
     TemplatePattern("[resume|start] listening"),
     TemplatePattern("[exit|leave] [privacy|sleep] mode"),
     TemplatePattern("resume [operation|operations]"),
@@ -39,6 +34,7 @@ _WAKE_PATTERNS = [
 
 def parse(text):
     t = text.strip().rstrip(".!").lower()
+    if t.startswith("and "): t = t[4:]
     if sleeping:
         for p in _WAKE_PATTERNS:
             if p.match(t) is not None:
